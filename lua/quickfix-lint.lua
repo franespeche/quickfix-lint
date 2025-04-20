@@ -1,11 +1,12 @@
 local M = {}
 
--- severity map
+-- Severity map for ESLint
 local severity_map = {
     [1] = "W", -- warning
     [2] = "E" -- error
 }
 
+-- Parse tsc -b output
 local function parse_tsc_output(output)
     local items = {}
 
@@ -27,6 +28,7 @@ local function parse_tsc_output(output)
     return items
 end
 
+-- Run ESLint and populate quickfix list
 function M.run_eslint()
     local eslint_output = vim.fn.system("yarn eslint --format json")
     local cleaned = eslint_output:match("%b[]") or "[]"
@@ -41,7 +43,7 @@ function M.run_eslint()
     for _, fileReport in ipairs(result) do
         local file = fileReport.filePath
         for _, msg in ipairs(fileReport.messages or {}) do
-            -- skip warnings
+            -- skip warnings (severity 1)
             if msg.severity == 1 then goto continue end
             table.insert(qf_list, {
                 filename = file,
@@ -55,13 +57,26 @@ function M.run_eslint()
         end
     end
 
-    -- populate the quickfix list
+    -- Populate the quickfix list for ESLint results
     vim.fn.setqflist({}, " ", {title = "ESLint Results", items = qf_list})
-
     vim.cmd("copen")
 end
 
--- auto command
-vim.api.nvim_create_user_command("QuickFixLint", M.run_eslint, {})
+-- Run tsc -b and populate quickfix list
+function M.run_tsc()
+    local tsc_output = vim.fn.system("tsc -b")
+    local items = parse_tsc_output(tsc_output)
+
+    -- Populate the quickfix list for TypeScript errors
+    vim.fn
+        .setqflist({}, " ", {title = "TypeScript Build Errors", items = items})
+    vim.cmd("copen")
+end
+
+-- User command for manual triggering
+vim.api.nvim_create_user_command("QuickFixLint", function() M.run_eslint() end,
+                                 {})
+
+vim.api.nvim_create_user_command("QuickFixTSC", function() M.run_tsc() end, {})
 
 return M
