@@ -1,17 +1,18 @@
 local M = {}
 
+local uv = vim.loop
+
 -- Severity map for ESLint
 local severity_map = {
     [1] = "W", -- warning
     [2] = "E" -- error
 }
 
--- Parse tsc -b output
+-- Parse tsc or build script output
 local function parse_tsc_output(output)
     local items = {}
 
     for line in output:gmatch("[^\r\n]+") do
-        -- Match lines like: tsconfig.app.json(23,5): error TS5023: Unknown compiler option 'noUncheckedSideEffectImports'.
         local file, lnum, col, msg = line:match(
                                          "([^:]+)%((%d+),(%d+)%)%:%s+error%s+TS%d+%:%s+(.*)")
         if file and lnum and col and msg then
@@ -20,7 +21,7 @@ local function parse_tsc_output(output)
                 lnum = tonumber(lnum),
                 col = tonumber(col),
                 text = msg,
-                type = "E" -- Always an error in this case
+                type = "E"
             })
         end
     end
@@ -28,7 +29,7 @@ local function parse_tsc_output(output)
     return items
 end
 
--- Run ESLint and populate quickfix list
+-- Run ESLint
 function M.run_eslint()
     local eslint_output = vim.fn.system("yarn eslint --format json")
     local cleaned = eslint_output:match("%b[]") or "[]"
@@ -43,7 +44,6 @@ function M.run_eslint()
     for _, fileReport in ipairs(result) do
         local file = fileReport.filePath
         for _, msg in ipairs(fileReport.messages or {}) do
-            -- skip warnings (severity 1)
             if msg.severity == 1 then goto continue end
             table.insert(qf_list, {
                 filename = file,
@@ -57,26 +57,51 @@ function M.run_eslint()
         end
     end
 
-    -- Populate the quickfix list for ESLint results
     vim.fn.setqflist({}, " ", {title = "ESLint Results", items = qf_list})
     vim.cmd("copen")
 end
 
--- Run tsc -b and populate quickfix list
+-- Run tsc -b
 function M.run_tsc()
     local tsc_output = vim.fn.system("tsc -b")
     local items = parse_tsc_output(tsc_output)
-
-    -- Populate the quickfix list for TypeScript errors
     vim.fn
         .setqflist({}, " ", {title = "TypeScript Build Errors", items = items})
     vim.cmd("copen")
 end
 
--- User command for manual triggering
+-- Run custom build script from package.json
+function M.run_package_build()
+    local package_json = vim.fn.findfile("package.json", ".;")
+    if package_json == "" then
+        print("No package.json found.")
+        return
+    end
+
+    local json_data = vim.fn.readfile(package_json)
+    local ok, parsed = pcall(vim.fn.json_decode, table.concat(json_data, "\n"))
+    if not ok or not parsed.scripts or not parsed.scripts.build then
+        print("No build script found in package.json.")
+        return
+    end
+
+    local build_cmd = parsed.scripts.build
+    print("Running: " .. build_cmd)
+
+    local output = vim.fn.system(build_cmd)
+    local items = parse_tsc_output(output)
+
+    vim.fn.setqflist({}, " ", {title = "Build Script Output", items = items})
+    vim.cmd("copen")
+end
+
+-- User commands
 vim.api.nvim_create_user_command("QuickFixLint", function() M.run_eslint() end,
                                  {})
 
 vim.api.nvim_create_user_command("QuickFixTSC", function() M.run_tsc() end, {})
+
+vim.api.nvim_create_user_command("QuickFixBuildScript",
+                                 function() M.run_package_build() end, {})
 
 return M
